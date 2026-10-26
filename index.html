@@ -232,7 +232,7 @@ hr{border:none;border-top:1px solid var(--border);margin:5px 0;}
         publicar este arquivo num site público com sua chave real dentro dele.
       </p>
       <label>Provedor de IA</label>
-      <select id="aiProvider" onchange="atualizarModeloPadrao()">
+      <select id="aiProvider" onchange="atualizarModeloPadrao(true)">
         <option value="groq">Groq</option>
         <option value="xai">xAI — Grok</option>
         <option value="openai">OpenAI</option>
@@ -863,7 +863,7 @@ function extrairJSON(texto){
 }
 
 async function gerarComGroq(){
-  const apiKey = (sessionStorage.getItem("smmwe_ai_api_key")||document.getElementById("groqApiKey").value).trim();
+  const apiKey = (document.getElementById("groqApiKey").value || sessionStorage.getItem("smmwe_ai_api_key") || "").trim();
   if(!apiKey){
     groqStatus("⚠️ Configure a chave primeiro","err");
     log("Configure sua chave de API antes de gerar.","err");
@@ -1244,7 +1244,7 @@ async function carregarTemplate(){
 }
 
 async function mapearIDsComGroq(idsReais){
-  const key = (sessionStorage.getItem("smmwe_ai_api_key")||localStorage.getItem("smmwe_groq_api_key")||"").trim() || (document.getElementById("groqApiKey")?.value||"").trim();
+  const key = ((document.getElementById("groqApiKey")?.value||"") || sessionStorage.getItem("smmwe_ai_api_key") || localStorage.getItem("smmwe_groq_api_key") || "").trim();
   if(!key) return null;
   const model = (localStorage.getItem("smmwe_ai_model_"+getAIProvider())||localStorage.getItem("smmwe_groq_model")||"").trim() || document.getElementById("groqModel")?.value || "openai/gpt-oss-120b";
 
