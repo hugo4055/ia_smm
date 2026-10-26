@@ -231,27 +231,17 @@ hr{border:none;border-top:1px solid var(--border);margin:5px 0;}
         pessoal/local — não compartilhe o link do site com a chave preenchida, e evite
         publicar este arquivo num site público com sua chave real dentro dele.
       </p>
-      <label>Chave da API Groq</label>
-      <input type="text" id="groqApiKey" placeholder="gsk_...">
-      <label>Modelo</label>
-      <select id="groqModel">
-        <optgroup label="🟢 Produção (recomendados)">
-          <option value="openai/gpt-oss-120b" selected>openai/gpt-oss-120b — mais inteligente</option>
-          <option value="openai/gpt-oss-20b">openai/gpt-oss-20b — mais rápido</option>
-        </optgroup>
-        <optgroup label="🟡 Produção (saindo do ar em 16/08/2026)">
-          <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
-          <option value="llama-3.1-8b-instant">llama-3.1-8b-instant (mais rápido)</option>
-        </optgroup>
-        <optgroup label="🔵 Preview (experimentais)">
-          <option value="qwen/qwen3.6-27b">qwen/qwen3.6-27b — raciocínio forte</option>
-        </optgroup>
-        <optgroup label="🟣 Sistemas agentic (com busca na web)">
-          <option value="groq/compound">groq/compound</option>
-          <option value="groq/compound-mini">groq/compound-mini — mais rápido</option>
-        </optgroup>
+      <label>Provedor de IA</label>
+      <select id="aiProvider" onchange="atualizarModeloPadrao()">
+        <option value="groq">Groq</option>
+        <option value="xai">xAI — Grok</option>
+        <option value="openai">OpenAI</option>
       </select>
-      <div style="font-size:8px;color:var(--dim);margin-top:3px;">💡 Modelos marcados em amarelo ainda funcionam, mas a Groq vai desligá-los em 16/08/2026.</div>
+      <label>Chave da API do provedor selecionado</label>
+      <input type="password" id="groqApiKey" placeholder="Cole sua API key" autocomplete="off">
+      <label>Modelo (pode editar)</label>
+      <input type="text" id="groqModel" value="openai/gpt-oss-120b" autocomplete="off">
+      <div style="font-size:8px;color:var(--dim);margin-top:3px;">Modelos padrão: Groq: openai/gpt-oss-120b · xAI: grok-3-mini · OpenAI: gpt-4.1-mini. A disponibilidade depende da sua conta. A chave fica na sessão atual do navegador; não compartilhe o computador nem a chave.</div>
       <div id="groqTestResult" style="font-size:9px;margin-top:6px;min-height:14px;"></div>
     </div>
     <div id="groqModalFooter">
@@ -759,45 +749,76 @@ function abrirModalGroq(){
 function fecharModalGroq(){
   document.getElementById("groqModalOverlay").classList.remove("open");
 }
+function getAIProvider(){
+  return document.getElementById("aiProvider")?.value || "groq";
+}
+function providerLabel(provider=getAIProvider()){
+  return ({groq:"Groq",xai:"xAI / Grok",openai:"OpenAI"})[provider] || "IA";
+}
+function atualizarModeloPadrao(force=false){
+  const provider = getAIProvider();
+  const input = document.getElementById("groqModel");
+  const defaults = {groq:"openai/gpt-oss-120b",xai:"grok-3-mini",openai:"gpt-4.1-mini"};
+  if(input && (force || !input.value.trim())) input.value = defaults[provider] || defaults.groq;
+}
 function salvarConfigGroq(){
   const key = document.getElementById("groqApiKey").value.trim();
-  const model = document.getElementById("groqModel").value;
+  const model = document.getElementById("groqModel").value.trim();
+  const provider = getAIProvider();
   try{
-    localStorage.setItem("smmwe_groq_api_key", key);
-    localStorage.setItem("smmwe_groq_model", model);
+    // Chave só na sessão atual; nunca commitá-la no código.
+    if(key) sessionStorage.setItem("smmwe_ai_api_key", key);
+    else sessionStorage.removeItem("smmwe_ai_api_key");
+    sessionStorage.setItem("smmwe_ai_provider", provider);
+    localStorage.setItem("smmwe_ai_model_"+provider, model);
+    // Migra e remove a antiga chave persistente do localStorage, se existir.
+    const legacy = localStorage.getItem("smmwe_groq_api_key");
+    if(legacy && !key) sessionStorage.setItem("smmwe_ai_api_key", legacy);
+    localStorage.removeItem("smmwe_groq_api_key");
+    localStorage.removeItem("smmwe_groq_model");
   }catch(e){}
   atualizarStatusGroqInicial();
   fecharModalGroq();
-  toast("Configuração da Groq salva!");
-  log("⚙️ Configuração da Groq atualizada.","ok");
+  toast("Configuração de IA salva nesta sessão.");
+  log("⚙️ Provedor configurado: "+providerLabel(provider)+".","ok");
 }
 function atualizarStatusGroqInicial(){
   const key = document.getElementById("groqApiKey").value.trim();
-  if(key) groqStatus("⭘ Groq configurado (pronto)","ok");
-  else groqStatus("⭘ Groq não configurado","");
+  const provider = getAIProvider();
+  if(key) groqStatus("⭘ "+providerLabel(provider)+" configurado (pronto)","ok");
+  else groqStatus("⭘ "+providerLabel(provider)+" não configurado","");
 }
 async function chamarGroq(systemPrompt, userPrompt, apiKey, model, maxTokens){
-  const resp = await fetch(GROQ_API_URL, {
+  const provider = getAIProvider();
+  const endpoints = {
+    groq: GROQ_API_URL,
+    xai: "https://api.x.ai/v1/chat/completions",
+    openai: "https://api.openai.com/v1/chat/completions"
+  };
+  const defaults = {groq:"openai/gpt-oss-120b",xai:"grok-3-mini",openai:"gpt-4.1-mini"};
+  const resp = await fetch(endpoints[provider] || endpoints.groq, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-    },
+    headers: {"Content-Type":"application/json","Authorization": "Bearer "+apiKey},
     body: JSON.stringify({
-      model: model || "openai/gpt-oss-120b",
+      model: model || defaults[provider] || defaults.groq,
       temperature: 1,
       max_tokens: maxTokens || 2500,
       messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-    }),
+        {role:"system",content:systemPrompt || "Siga as instruções do usuário com precisão."},
+        {role:"user",content:userPrompt}
+      ]
+    })
   });
-  const data = await resp.json();
-  if(data.error){
-    throw new Error(typeof data.error === "string" ? data.error : (data.error.message || JSON.stringify(data.error)));
+  let data;
+  try { data = await resp.json(); }
+  catch(e) { throw new Error("Resposta inválida do provedor. Confira o modelo e tente novamente."); }
+  if(!resp.ok || data.error){
+    const detail = data?.error?.message || data?.error || ("HTTP "+resp.status);
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
   }
-  return data?.choices?.[0]?.message?.content || "";
+  const content = data?.choices?.[0]?.message?.content;
+  if(typeof content !== "string" || !content.trim()) throw new Error("O provedor não retornou conteúdo. Tente outro modelo.");
+  return content;
 }
 async function testarConexaoGroq(){
   const key = document.getElementById("groqApiKey").value.trim();
@@ -817,10 +838,13 @@ async function testarConexaoGroq(){
 }
 document.addEventListener("DOMContentLoaded", ()=>{
   try{
-    const savedKey = localStorage.getItem("smmwe_groq_api_key");
+    const savedKey = sessionStorage.getItem("smmwe_ai_api_key") || localStorage.getItem("smmwe_groq_api_key") || "";
     if(savedKey) document.getElementById("groqApiKey").value = savedKey;
-    const savedModel = localStorage.getItem("smmwe_groq_model");
+    const savedProvider = sessionStorage.getItem("smmwe_ai_provider") || "groq";
+    document.getElementById("aiProvider").value = savedProvider;
+    const savedModel = localStorage.getItem("smmwe_ai_model_"+savedProvider) || localStorage.getItem("smmwe_groq_model") || "";
     if(savedModel) document.getElementById("groqModel").value = savedModel;
+    else atualizarModeloPadrao(true);
   }catch(e){}
   atualizarStatusGroqInicial();
 });
@@ -839,10 +863,10 @@ function extrairJSON(texto){
 }
 
 async function gerarComGroq(){
-  const apiKey = document.getElementById("groqApiKey").value.trim();
+  const apiKey = (sessionStorage.getItem("smmwe_ai_api_key")||document.getElementById("groqApiKey").value).trim();
   if(!apiKey){
     groqStatus("⚠️ Configure a chave primeiro","err");
-    log("Configure sua chave da API Groq antes de gerar.","err");
+    log("Configure sua chave de API antes de gerar.","err");
     abrirModalGroq();
     return;
   }
@@ -850,8 +874,8 @@ async function gerarComGroq(){
 
   const btn = document.getElementById("btnGerarGroq");
   btn.disabled = true;
-  groqStatus("⏳ Consultando Groq...","");
-  log("🧠 Enviando pedido de geração para a IA (Groq)...","warn");
+  groqStatus("⏳ Consultando "+providerLabel()+"...","");
+  log("🧠 Enviando pedido de geração para "+providerLabel()+"...","warn");
 
   // IMPORTANTE: recria o grid (lê largura/altura dos selects) ANTES de calcular
   // yG/xUtil, para que o prompt enviado à IA descreva o MESMO tamanho de grid
@@ -1063,8 +1087,8 @@ function aplicarDesignIA(design, ctx){
     simularIA();
   }
   atualizarTileCount();
-  log(`✅ Fase gerada pela Groq! [${ctx.dif}/${tema}] ${largura}×${altura}`,"ok");
-  toast("Fase gerada pela IA (Groq)!");
+  log(`✅ Fase gerada por ${providerLabel()}! [${ctx.dif}/${tema}] ${largura}×${altura}`,"ok");
+  toast("Fase gerada pela IA!");
 }
 
 // ============================================================
@@ -1167,9 +1191,12 @@ function decodificarSwe(rawOriginal){
   if(resto===2) base64 += "==";
   else if(resto===3) base64 += "=";
   else if(resto===1) throw new Error("Base64 do arquivo parece corrompido (tamanho inválido).");
-  let decodedJson;
-  try{ decodedJson = atob(base64); }
+  let decodedBinary;
+  try{ decodedBinary = atob(base64); }
   catch(errAtob){ throw new Error("Não foi possível decodificar o conteúdo do arquivo (base64 inválido). Verifique se o arquivo .swe não foi alterado/corrompido."); }
+  // atob retorna bytes; decodificar como UTF-8 evita falha com nomes e descrições acentuados.
+  const bytes = Uint8Array.from(decodedBinary, ch => ch.charCodeAt(0));
+  const decodedJson = new TextDecoder("utf-8", {fatal:true}).decode(bytes);
   return JSON.parse(decodedJson);
 }
 
@@ -1217,9 +1244,9 @@ async function carregarTemplate(){
 }
 
 async function mapearIDsComGroq(idsReais){
-  const key = (localStorage.getItem("smmwe_groq_api_key")||"").trim() || (document.getElementById("groqApiKey")?.value||"").trim();
+  const key = (sessionStorage.getItem("smmwe_ai_api_key")||localStorage.getItem("smmwe_groq_api_key")||"").trim() || (document.getElementById("groqApiKey")?.value||"").trim();
   if(!key) return null;
-  const model = (localStorage.getItem("smmwe_groq_model")||"").trim() || document.getElementById("groqModel")?.value || "openai/gpt-oss-120b";
+  const model = (localStorage.getItem("smmwe_ai_model_"+getAIProvider())||localStorage.getItem("smmwe_groq_model")||"").trim() || document.getElementById("groqModel")?.value || "openai/gpt-oss-120b";
 
   const tiposInfo = Object.keys(TILES).filter(t=>t!=="erase").map(t=>{
     const info = TILES[t];
