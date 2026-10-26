@@ -109,6 +109,12 @@ hr{border:none;border-top:1px solid var(--border);margin:5px 0;}
       <button class="btn" onclick="carregarTemplate()">📂 Carregar/Adicionar Base(s)</button>
       <div id="basesLista" style="font-size:9px;color:var(--dim);margin:4px 0;line-height:1.6;"></div>
       <hr>
+      <label>Relatório REA (opcional: .md, .txt ou .json)</label>
+      <input type="file" id="reaReportFile" accept=".md,.txt,.json,.log">
+      <button class="btn" onclick="carregarRelatorioREA()">🧠 Carregar análise REA</button>
+      <div id="reaReportStatus" style="font-size:9px;color:var(--dim);margin:4px 0;line-height:1.5;">Nenhum relatório REA carregado.</div>
+      <button class="btn" onclick="limparRelatorioREA()">✕ Remover relatório REA</button>
+      <hr>
       <label>Nome da Fase</label>
       <input type="text" id="nomeFase" placeholder="Minha Fase">
       <label>Criador</label>
@@ -912,6 +918,13 @@ ${JSON.stringify(idsParaPrompt)}
 IMPORTANTE sobre os IDs: escolha SEMPRE um ID real dessa lista pra cada elemento que você posicionar (campo "id" em cada item, e os campos *_id no topo). NUNCA invente um ID que não esteja na lista. Prefira manter todos os elementos vindos de um conjunto visualmente coerente — o objetivo é uma fase com visual consistente, não uma mistura aleatória de vários templates diferentes.` :
 `Nenhum template .swe foi carregado ainda, então não use o campo "id" (deixe null) — apenas "tipo".`;
 
+  const blocoREA = relatorioREA
+    ? `=== RELATÓRIO DE ENGENHARIA REVERSA (REA): ${nomeRelatorioREA || "relatório carregado"} ===
+${relatorioREA}
+
+Use este relatório como contexto técnico para entender o formato, os objetos e as regras do SMM:WE. Diferencie fatos confirmados de hipóteses. Se houver conflito, os IDs reais presentes nos templates .swe carregados são a fonte de verdade para os IDs disponíveis. Não invente campos ou IDs com base apenas em hipóteses.`
+    : "Nenhum relatório REA foi carregado; use somente as informações do editor e os objetos dos templates .swe.";
+
   const systemPrompt =
 `Atue como um desenvolvedor de jogos especialista em geração procedural e design de níveis. Sua tarefa é criar um novo level de Super Mario Maker seguindo estritamente as regras abaixo, dividindo seu processo em quatro etapas consecutivas.
 
@@ -939,6 +952,9 @@ Tiles de inimigo permitidos: goomba, goomba_w, koopa, koopa_red, buzzy, spiny, d
 
 === TEMPLATES ===
 ${blocoIds}
+
+=== CONTEXTO TÉCNICO REA ===
+${blocoREA}
 
 Responda SOMENTE neste formato JSON exato:
 {
@@ -974,6 +990,8 @@ Regras:
 - Intensidade de inimigos (0-100): ${densIn}
 - Intensidade de buracos (0-100): ${freqB}
 ${extra ? "- Pedido extra do usuário: "+extra : ""}
+
+Considere também o relatório REA carregado no editor, se houver. Projete a fase para ser exportável com a estrutura de objetos que o editor realmente conhece.
 
 Siga as 4 etapas e responda apenas o JSON.`;
 
@@ -1156,6 +1174,40 @@ function limparMapa(){if(!confirm("Limpar?"))return;salvarHistorico();mapa=Array
 // TEMPLATE & BANCO — com resolução inteligente de IDs
 // ============================================================
 let basesCarregadas = []; // {nome, objCount}
+let relatorioREA = "";
+let nomeRelatorioREA = "";
+
+async function carregarRelatorioREA(){
+  const input = document.getElementById("reaReportFile");
+  const file = input.files && input.files[0];
+  if(!file){ log("Selecione primeiro o relatório gerado pelo REA (.md, .txt ou .json).","warn"); return; }
+  try{
+    const texto = await lerArquivoComoTexto(file);
+    if(!texto || !texto.trim()) throw new Error("O arquivo está vazio.");
+    relatorioREA = texto.trim().slice(0,12000);
+    nomeRelatorioREA = file.name;
+    const cortado = texto.trim().length > 12000;
+    const status = document.getElementById("reaReportStatus");
+    status.textContent = "✅ "+file.name+" carregado ("+Math.min(texto.trim().length,12000)+" caracteres"+(cortado?" — trecho inicial usado":"")+")";
+    status.style.color = "var(--accent3)";
+    log("Relatório REA carregado"+(cortado?" (máximo de 12.000 caracteres enviados à IA)":"")+": "+file.name,"ok");
+    toast("Análise REA carregada!");
+  }catch(e){
+    relatorioREA = ""; nomeRelatorioREA = "";
+    document.getElementById("reaReportStatus").textContent = "❌ Não foi possível ler o relatório: "+e.message;
+    document.getElementById("reaReportStatus").style.color = "var(--accent)";
+    log("Erro ao carregar relatório REA: "+e.message,"err");
+  }
+  input.value = "";
+}
+function limparRelatorioREA(){
+  relatorioREA = ""; nomeRelatorioREA = "";
+  const status = document.getElementById("reaReportStatus");
+  if(status){ status.textContent = "Nenhum relatório REA carregado."; status.style.color = "var(--dim)"; }
+  const input = document.getElementById("reaReportFile");
+  if(input) input.value = "";
+  log("Relatório REA removido da sessão.","warn");
+}
 
 function renderBasesLista(){
   const el = document.getElementById("basesLista");
