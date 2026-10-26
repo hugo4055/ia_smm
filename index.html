@@ -104,10 +104,10 @@ hr{border:none;border-top:1px solid var(--border);margin:5px 0;}
 
     <div class="s-title">📁 Arquivo</div>
     <div class="s-body">
-      <label>Bases .swe <span style="color:var(--dim)">(pode escolher várias, ou adicionar mais depois)</span></label>
-      <input type="file" id="templateFile" accept=".swe" multiple>
-      <button class="btn" onclick="carregarTemplate()">📂 Carregar/Adicionar Base(s)</button>
-      <div id="basesLista" style="font-size:9px;color:var(--dim);margin:4px 0;line-height:1.6;"></div>
+      <label>Template .swe (opcional, apenas para exportar no formato do jogo)</label>
+      <input type="file" id="templateFile" accept=".swe">
+      <button class="btn" onclick="carregarTemplate()">📂 Carregar template</button>
+      <div id="basesLista" style="font-size:9px;color:var(--dim);margin:4px 0;line-height:1.6;">Nenhum template carregado. O editor funciona sem template; para exportar .swe, carregue um arquivo válido.</div>
       <hr>
       <label>Relatório REA (opcional: .md, .txt ou .json)</label>
       <input type="file" id="reaReportFile" accept=".md,.txt,.json,.log">
@@ -1173,7 +1173,7 @@ function limparMapa(){if(!confirm("Limpar?"))return;salvarHistorico();mapa=Array
 // ============================================================
 // TEMPLATE & BANCO — com resolução inteligente de IDs
 // ============================================================
-let basesCarregadas = []; // {nome, objCount}
+let basesCarregadas = []; // Mantido como lista interna de compatibilidade; apenas um template é aceito.
 let relatorioREA = "";
 let nomeRelatorioREA = "";
 
@@ -1262,37 +1262,31 @@ function lerArquivoComoTexto(f){
 }
 
 async function carregarTemplate(){
-  const files=Array.from(document.getElementById("templateFile").files||[]);
-  if(files.length===0){log("Nenhum arquivo selecionado.","err");return;}
-
-  let sucesso=0, falhas=0;
-  for(const f of files){
-    try{
-      const rawOriginal = await lerArquivoComoTexto(f);
-      const parsed = decodificarSwe(rawOriginal);
-      if(!parsed?.S0?.S4){ throw new Error("Arquivo não tem a estrutura S0.S4 esperada."); }
-      if(!template) template = parsed; // primeira base carregada vira o "esqueleto" usado na exportação
-      basesCarregadas.push({ nome: f.name, objCount: parsed.S0.S4.length, template: parsed });
-      sucesso++;
-      log(`Base carregada: ${f.name} (${parsed.S0.S4.length} objetos)`,"ok");
-    }catch(err){
-      falhas++;
-      log(`Erro ao carregar "${f.name}": `+err.message,"err");
-    }
-  }
-
-  if(sucesso>0){
-    await reconstruirBancoDeTodasAsBases();
-    renderBasesLista();
+  const input=document.getElementById("templateFile");
+  const f=input.files && input.files[0];
+  if(!f){log("Selecione um arquivo .swe.","warn");return;}
+  try{
+    const raw=await lerArquivoComoTexto(f);
+    const parsed=decodificarSwe(raw);
+    if(!parsed?.S0?.S4) throw new Error("O arquivo não contém a estrutura S0.S4 esperada.");
+    template=parsed;
+    basesCarregadas=[{nome:f.name,objCount:parsed.S0.S4.length,template:parsed}];
+    // Não construir banco de objetos nem mapear IDs automaticamente.
+    bancoObjetos={}; mapeamentoManual={}; mapaIdsOverride={};
+    const lista=document.getElementById("basesLista");
+    lista.textContent="✅ Template de exportação carregado: "+f.name+" ("+parsed.S0.S4.length+" objetos). Sem mapeamento automático de objetos.";
     document.getElementById("templateStatus").className="badge ok";
-    document.getElementById("templateStatus").textContent=`✅ ${basesCarregadas.length} base(s) ok`;
-    toast(sucesso>1 ? `${sucesso} bases carregadas!` : "Base carregada!");
-  }
-  if(falhas>0 && sucesso===0){
+    document.getElementById("templateStatus").textContent="✅ Template carregado";
+    log("Template carregado apenas como estrutura para exportação. Sistema de múltiplas bases e mapeamento automático desativado.","ok");
+    toast("Template carregado!");
+  }catch(err){
+    template=null; basesCarregadas=[]; bancoObjetos={}; mapeamentoManual={}; mapaIdsOverride={};
     document.getElementById("templateStatus").className="badge err";
-    document.getElementById("templateStatus").textContent="❌ Erro";
+    document.getElementById("templateStatus").textContent="❌ Template inválido";
+    document.getElementById("basesLista").textContent="Não foi possível carregar: "+err.message;
+    log("Erro ao carregar template: "+err.message,"err");
   }
-  document.getElementById("templateFile").value = ""; // permite reselecionar o mesmo arquivo depois
+  input.value="";
 }
 
 async function mapearIDsComGroq(idsReais){
@@ -1327,41 +1321,14 @@ Responda só o JSON de mapeamento, em formato compacto.`;
 }
 
 async function reconstruirBancoDeTodasAsBases(){
+  // Desativado: não combinar templates nem inferir IDs de objetos.
   bancoObjetos={};
-  let totalObj=0;
-  for(const base of basesCarregadas){
-    for(const obj of base.template.S0.S4){
-      if(obj.ID){
-        if(!bancoObjetos[obj.ID]) bancoObjetos[obj.ID]=[];
-        bancoObjetos[obj.ID].push(obj);
-        totalObj++;
-      }
-    }
-  }
-  const ids=Object.keys(bancoObjetos);
-  log(`Banco combinado: ${ids.length} tipos de ID, ${totalObj} instâncias no total de ${basesCarregadas.length} base(s).`,"ok");
-  log(`IDs: ${ids.slice(0,20).join(", ")}${ids.length>20?"...":""}`);
-  log(`💡 Ao gerar uma fase com "🧠 Gerar Fase", a própria IA vai ler esses IDs e escolher diretamente quais usar — não depende mais de um mapeamento automático prévio.`);
-
-  // Mapeamento local (regex) fica só como reserva silenciosa pra pintura manual
-  // no pincel — a geração via IA não usa isso, ela escolhe os IDs direto.
   mapeamentoManual={};
-  const naoEncontrados=[];
-  const todosTiles=Object.keys(TILES).filter(t=>t!=="erase");
-  for(const tipo of todosTiles){
-    const id=resolverIDInterno(tipo,ids);
-    if(id) mapeamentoManual[tipo]=id;
-    else naoEncontrados.push(tipo);
-  }
-
-  if(naoEncontrados.length>0){
-    log(`⚠️ Sem ID automático pro pincel manual: ${naoEncontrados.join(", ")}. Isso não afeta a geração por IA — só a pintura manual desses tiles específicos pode não exportar corretamente.`,"warn");
-  }
 }
-
 function extrairBanco(){
-  // Mantido por compatibilidade: recalcula o banco a partir de basesCarregadas.
-  reconstruirBancoDeTodasAsBases();
+  // Compatibilidade com chamadas antigas; não há banco automático.
+  bancoObjetos={};
+  mapeamentoManual={};
 }
 
 
